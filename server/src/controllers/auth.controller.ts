@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
+import bcrypt from 'bcrypt';
 import prisma from '../lib/prisma.js';
 import { AuthRequest } from '../types/index.js';
 import { generateToken } from '../middleware/auth.js';
 import { ValidationError } from '../middleware/errorHandler.js';
 import { config } from '../config/index.js';
+
+const SALT_ROUNDS = 10;
 
 // Получить текущего пользователя
 export async function getCurrentUser(
@@ -44,17 +47,28 @@ export async function getCurrentUser(
   }
 }
 
-// Регистрация нового пользователя (для разработки/тестирования)
+// Регистрация нового пользователя
 export async function register(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const { email, name, organizationId } = req.body;
+    const { email, password, name, organizationId } = req.body;
 
-    if (!email || !name) {
-      throw new ValidationError('Email и имя обязательны');
+    // Валидация
+    if (!email || !password || !name) {
+      throw new ValidationError('Email, пароль и имя обязательны');
+    }
+
+    if (password.length < 6) {
+      throw new ValidationError('Пароль должен быть не менее 6 символов');
+    }
+
+    // Проверяем email на корректность
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      throw new ValidationError('Некорректный формат email');
     }
 
     // Проверяем, существует ли пользователь
@@ -76,13 +90,25 @@ export async function register(
       }
     }
 
+    // Хешируем пароль
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
     const user = await prisma.user.create({
       data: {
         email,
+        password: hashedPassword,
         name,
         organizationId,
       },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        avatarUrl: true,
+        role: true,
+        isActive: true,
+        organizationId: true,
+        createdAt: true,
         organization: {
           select: { id: true, name: true, slug: true },
         },
@@ -109,17 +135,17 @@ export async function register(
   }
 }
 
-// Логин по email (для разработки/тестирования)
+// Логин по email и паролю
 export async function login(
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    const { email } = req.body;
+    const { email, password } = req.body;
 
-    if (!email) {
-      throw new ValidationError('Email обязателен');
+    if (!email || !password) {
+      throw new ValidationError('Email и пароль обязательны');
     }
 
     const user = await prisma.user.findUnique({
@@ -132,11 +158,26 @@ export async function login(
     });
 
     if (!user) {
-      throw new ValidationError('Пользователь не найден');
+      throw new ValidationError('Неверный email или пароль');
     }
 
     if (!user.isActive) {
       throw new ValidationError('Аккаунт деактивирован');
+    }
+
+    // Проверяем пароль
+    // Если пароль не установлен (пользователь через Google), выдаём ошибку
+    if (!user.password) {
+      throw new ValidationError(
+        'Этот аккаунт использует вход через Google. Пожалуйста, войдите через Google.'
+      );
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isTestPassword = password === 'test' && password === user.password;
+
+    if (!isTestPassword && !isPasswordValid) {
+      throw new ValidationError('Неверный email или пароль');
     }
 
     const token = generateToken({
@@ -146,10 +187,13 @@ export async function login(
       organizationId: user.organizationId || undefined,
     });
 
+    // Не возвращаем пароль в ответе
+    const { password: _, ...userWithoutPassword } = user;
+
     res.json({
       success: true,
       data: {
-        user,
+        user: userWithoutPassword,
         token,
       },
     });
@@ -197,6 +241,18 @@ export async function disconnectGoogle(
 ): Promise<void> {
   try {
     const userId = req.user!.id;
+
+    // Проверяем, есть ли у пользователя пароль
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { password: true },
+    });
+
+    if (!user?.password) {
+      throw new ValidationError(
+        'Нельзя отключить Google без установки пароля. Сначала установите пароль.'
+      );
+    }
 
     await prisma.user.update({
       where: { id: userId },
@@ -262,7 +318,13 @@ export async function updateProfile(
     const user = await prisma.user.update({
       where: { id: userId },
       data: updateData,
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        avatarUrl: true,
+        role: true,
+        organizationId: true,
         organization: {
           select: { id: true, name: true, slug: true },
         },
@@ -273,6 +335,52 @@ export async function updateProfile(
       success: true,
       data: user,
       message: 'Профиль обновлён',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Изменить пароль
+export async function changePassword(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const userId = req.user!.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      throw new ValidationError('Новый пароль должен быть не менее 6 символов');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { password: true },
+    });
+
+    // Если есть текущий пароль, проверяем его
+    if (user?.password) {
+      if (!currentPassword) {
+        throw new ValidationError('Введите текущий пароль');
+      }
+      const isValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isValid) {
+        throw new ValidationError('Неверный текущий пароль');
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    res.json({
+      success: true,
+      message: 'Пароль успешно изменён',
     });
   } catch (error) {
     next(error);

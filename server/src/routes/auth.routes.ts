@@ -6,6 +6,7 @@ import {
   login,
   googleCallback,
   updateProfile,
+  changePassword,
   getOrganizationUsers,
   disconnectGoogle,
   getGoogleStatus,
@@ -49,6 +50,7 @@ router.get('/google/failure', (_, res) => {
 // Защищённые маршруты
 router.get('/me', authenticate, getCurrentUser);
 router.patch('/me', authenticate, updateProfile);
+router.post('/change-password', authenticate, changePassword);
 router.get('/users', authenticate, getOrganizationUsers);
 
 // Google интеграция

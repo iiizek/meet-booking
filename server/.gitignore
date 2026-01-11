@@ -28,3 +28,6 @@ prisma/migrations/
 
 # Test coverage
 coverage/
+
+# Uploads (user files)
+uploads/

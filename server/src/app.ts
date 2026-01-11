@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import passport from 'passport';
 import { config } from './config/index.js';
 import { configurePassport } from './config/passport.js';
@@ -16,6 +17,9 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Статические файлы (uploads)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Passport initialization
 configurePassport();
