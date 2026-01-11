@@ -1,0 +1,141 @@
+// Prisma Schema для системы бронирования переговорных комнат
+// Документация: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUM типы
+// ==========================================
+
+enum UserRole {
+  admin
+  member
+
+  @@map("user_role")
+}
+
+enum BookingStatus {
+  confirmed
+  cancelled
+  pending
+
+  @@map("booking_status")
+}
+
+// ==========================================
+// Модели
+// ==========================================
+
+model Organization {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  slug        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Связи
+  users User[]
+  rooms Room[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?   @map("organization_id") @db.Uuid
+  email          String    @unique @db.VarChar(255)
+  name           String    @db.VarChar(255)
+  avatarUrl      String?   @map("avatar_url") @db.Text
+  googleId       String?   @unique @map("google_id") @db.VarChar(255)
+  role           UserRole  @default(member)
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Связи
+  organization  Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bookings      Booking[]
+  participantIn BookingParticipant[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([googleId])
+  @@map("users")
+}
+
+model Room {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String   @db.VarChar(255)
+  description    String?  @db.Text
+  capacity       Int
+  floor          Int?
+  amenities      Json     @default("[]") @db.JsonB
+  imageUrl       String?  @map("image_url") @db.Text
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Связи
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bookings     Booking[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([capacity])
+  @@index([isActive])
+  @@map("rooms")
+}
+
+model Booking {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId               String        @map("room_id") @db.Uuid
+  userId               String        @map("user_id") @db.Uuid
+  title                String        @db.VarChar(255)
+  description          String?       @db.Text
+  startTime            DateTime      @map("start_time") @db.Timestamptz
+  endTime              DateTime      @map("end_time") @db.Timestamptz
+  status               BookingStatus @default(confirmed)
+  googleEventId        String?       @map("google_event_id") @db.VarChar(255)
+  googleCalendarSynced Boolean       @default(false) @map("google_calendar_synced")
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Связи
+  room         Room                 @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  participants BookingParticipant[]
+
+  @@index([roomId])
+  @@index([userId])
+  @@index([status])
+  @@index([startTime])
+  @@index([endTime])
+  @@index([roomId, startTime, endTime])
+  @@index([googleEventId])
+  @@map("bookings")
+}
+
+model BookingParticipant {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bookingId String   @map("booking_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Связи
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, userId])
+  @@index([bookingId])
+  @@index([userId])
+  @@map("booking_participants")
+}
