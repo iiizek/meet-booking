@@ -4,6 +4,7 @@ import roomsRoutes from './rooms.routes.js';
 import bookingsRoutes from './bookings.routes.js';
 import calendarRoutes from './calendar.routes.js';
 import commonRoutes from './common.routes.js';
+import organizationsRoutes from './organizations.routes.js';
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.get('/health', (_, res) => {
 
 // API routes
 router.use('/auth', authRoutes);
+router.use('/organizations', organizationsRoutes);
 router.use('/rooms', roomsRoutes);
 router.use('/bookings', bookingsRoutes);
 router.use('/calendar', calendarRoutes);

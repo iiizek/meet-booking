@@ -42,10 +42,34 @@ model Organization {
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   // Связи
-  users User[]
-  rooms Room[]
+  users   User[]
+  rooms   Room[]
+  invites OrganizationInvite[]
 
   @@map("organizations")
+}
+
+model OrganizationInvite {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  code           String    @unique @db.VarChar(20)
+  createdById    String    @map("created_by_id") @db.Uuid
+  email          String?   @db.VarChar(255) // Опционально: инвайт для конкретного email
+  role           UserRole  @default(member) // Роль, которую получит пользователь
+  usedById       String?   @unique @map("used_by_id") @db.Uuid
+  usedAt         DateTime? @map("used_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  // Связи
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("InviteCreator", fields: [createdById], references: [id])
+  usedBy       User?        @relation("InviteUser", fields: [usedById], references: [id])
+
+  @@index([organizationId])
+  @@index([code])
+  @@index([email])
+  @@map("organization_invites")
 }
 
 model User {
@@ -64,9 +88,11 @@ model User {
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   // Связи
-  organization  Organization?          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  bookings      Booking[]
-  participantIn BookingParticipant[]
+  organization   Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+  participantIn  BookingParticipant[]
+  createdInvites OrganizationInvite[] @relation("InviteCreator")
+  usedInvite     OrganizationInvite?  @relation("InviteUser")
 
   @@index([organizationId])
   @@index([email])

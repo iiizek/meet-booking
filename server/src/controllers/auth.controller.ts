@@ -40,6 +40,7 @@ export async function getCurrentUser(
       data: {
         ...user,
         hasGoogleCalendar: !!user?.googleId,
+        needsOrganization: !user?.organizationId, // Флаг для фронтенда
       },
     });
   } catch (error) {

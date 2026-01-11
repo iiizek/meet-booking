@@ -116,6 +116,39 @@ npm run dev
 | POST | /api/calendar/sync-all | Синхронизировать все бронирования |
 | DELETE | /api/calendar/unlink/:bookingId | Отвязать от Google Calendar |
 
+### Организации
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | /api/organizations | Создать организацию |
+| GET | /api/organizations/my | Моя организация |
+| PATCH | /api/organizations/my | Обновить организацию (admin) |
+| POST | /api/organizations/join | Присоединиться по инвайт-коду |
+| POST | /api/organizations/leave | Покинуть организацию |
+| POST | /api/organizations/invites | Создать инвайт (admin) |
+| GET | /api/organizations/invites | Список инвайтов (admin) |
+| DELETE | /api/organizations/invites/:id | Отозвать инвайт (admin) |
+| GET | /api/organizations/invites/check/:code | Проверить инвайт-код |
+| DELETE | /api/organizations/members/:id | Удалить участника (admin) |
+| PATCH | /api/organizations/members/:id/role | Изменить роль (admin) |
+
+## Флоу работы с организациями
+
+### Новый пользователь
+
+1. Регистрация/вход → получает `needsOrganization: true`
+2. Фронтенд показывает экран выбора:
+   - **Создать организацию** → `POST /api/organizations`
+   - **Присоединиться** → ввод кода → `POST /api/organizations/join`
+
+### Инвайт-коды
+
+1. Админ создаёт инвайт: `POST /api/organizations/invites`
+2. Получает код (например: `A1B2C3D4E5F6`)
+3. Отправляет код новому участнику
+4. Участник вводит код при присоединении
+5. Код одноразовый, имеет срок действия (по умолчанию 7 дней)
+
 ## Google Calendar интеграция
 
 ### Как это работает
