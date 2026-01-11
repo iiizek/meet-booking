@@ -3,6 +3,7 @@ import prisma from '../lib/prisma.js';
 import { AuthRequest } from '../types/index.js';
 import { generateToken } from '../middleware/auth.js';
 import { ValidationError } from '../middleware/errorHandler.js';
+import { config } from '../config/index.js';
 
 // Получить текущего пользователя
 export async function getCurrentUser(
@@ -13,7 +14,18 @@ export async function getCurrentUser(
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        avatarUrl: true,
+        role: true,
+        isActive: true,
+        organizationId: true,
+        googleId: true,
+        // Не возвращаем токены!
+        createdAt: true,
+        updatedAt: true,
         organization: {
           select: { id: true, name: true, slug: true },
         },
@@ -22,7 +34,10 @@ export async function getCurrentUser(
 
     res.json({
       success: true,
-      data: user,
+      data: {
+        ...user,
+        hasGoogleCalendar: !!user?.googleId,
+      },
     });
   } catch (error) {
     next(error);
@@ -154,7 +169,9 @@ export async function googleCallback(
     const user = req.user;
 
     if (!user) {
-      throw new ValidationError('Ошибка авторизации через Google');
+      const clientUrl = config.clientUrl;
+      res.redirect(`${clientUrl}/auth/callback?error=auth_failed`);
+      return;
     }
 
     const token = generateToken({
@@ -165,8 +182,64 @@ export async function googleCallback(
     });
 
     // Редирект на клиент с токеном
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const clientUrl = config.clientUrl;
     res.redirect(`${clientUrl}/auth/callback?token=${token}`);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Отключить Google аккаунт
+export async function disconnectGoogle(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const userId = req.user!.id;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        googleId: null,
+        googleAccessToken: null,
+        googleRefreshToken: null,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Google аккаунт отключён',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Проверить статус подключения Google Calendar
+export async function getGoogleStatus(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.id },
+      select: {
+        googleId: true,
+        googleAccessToken: true,
+        googleRefreshToken: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        connected: !!user?.googleId,
+        hasAccessToken: !!user?.googleAccessToken,
+        hasRefreshToken: !!user?.googleRefreshToken,
+      },
+    });
   } catch (error) {
     next(error);
   }

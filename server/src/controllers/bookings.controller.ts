@@ -2,6 +2,7 @@ import { Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
 import { AuthRequest, CreateBookingDto, UpdateBookingDto } from '../types/index.js';
 import { NotFoundError, ValidationError, ConflictError } from '../middleware/errorHandler.js';
+import { googleCalendarService } from '../services/googleCalendar.service.js';
 
 // Получить все бронирования пользователя
 export async function getMyBookings(
@@ -242,11 +243,15 @@ export async function createBooking(
           : undefined,
       },
       include: {
-        room: {
-          select: { id: true, name: true, floor: true },
-        },
+        room: true,
         user: {
-          select: { id: true, name: true, email: true },
+          select: { 
+            id: true, 
+            name: true, 
+            email: true,
+            googleAccessToken: true,
+            googleRefreshToken: true,
+          },
         },
         participants: {
           include: {
@@ -258,9 +263,33 @@ export async function createBooking(
       },
     });
 
+    // Синхронизация с Google Calendar (если пользователь авторизован через Google)
+    let googleEventResult = null;
+    if (booking.user.googleAccessToken) {
+      try {
+        const attendeeEmails = booking.participants.map((p) => p.user.email);
+        googleEventResult = await googleCalendarService.createEvent(
+          req.user!,
+          booking,
+          attendeeEmails
+        );
+      } catch (error) {
+        // Логируем ошибку, но не прерываем создание бронирования
+        console.error('Failed to sync with Google Calendar:', error);
+      }
+    }
+
     res.status(201).json({
       success: true,
-      data: booking,
+      data: {
+        ...booking,
+        user: {
+          id: booking.user.id,
+          name: booking.user.name,
+          email: booking.user.email,
+        },
+        googleCalendar: googleEventResult,
+      },
       message: 'Бронирование успешно создано',
     });
   } catch (error) {
@@ -419,6 +448,15 @@ export async function cancelBooking(
       where: { id },
       data: { status: 'cancelled' },
     });
+
+    // Отмена события в Google Calendar
+    if (existingBooking.googleEventId && req.user!.googleAccessToken) {
+      try {
+        await googleCalendarService.cancelEvent(req.user!, existingBooking.googleEventId);
+      } catch (error) {
+        console.error('Failed to cancel Google Calendar event:', error);
+      }
+    }
 
     res.json({
       success: true,

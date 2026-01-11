@@ -1,9 +1,15 @@
 import { Request } from 'express';
 import { User } from '@prisma/client';
 
+// Расширяем тип User с Google токенами
+export interface UserWithGoogleTokens extends User {
+  googleAccessToken: string | null;
+  googleRefreshToken: string | null;
+}
+
 // Расширение Request для добавления пользователя
 export interface AuthRequest extends Request {
-  user?: User;
+  user?: UserWithGoogleTokens;
 }
 
 // DTO для создания организации

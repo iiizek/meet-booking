@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import passport from 'passport';
 import { config } from './config/index.js';
+import { configurePassport } from './config/passport.js';
 import routes from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
@@ -14,6 +16,10 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Passport initialization
+configurePassport();
+app.use(passport.initialize());
 
 // Request logging в development
 if (config.nodeEnv === 'development') {

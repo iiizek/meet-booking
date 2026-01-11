@@ -9,6 +9,8 @@ API сервер для системы бронирования перегово
 - Prisma ORM
 - PostgreSQL
 - JWT авторизация
+- Google OAuth 2.0
+- Google Calendar API
 
 ## Быстрый старт
 
@@ -28,14 +30,37 @@ cp .env.example .env
 
 Обязательные переменные:
 - `DATABASE_URL` — строка подключения к PostgreSQL
+- `GOOGLE_CLIENT_ID` — Client ID из Google Cloud Console
+- `GOOGLE_CLIENT_SECRET` — Client Secret из Google Cloud Console
 
-### 3. Генерация Prisma клиента
+### 3. Настройка Google Cloud
+
+1. Перейдите на [Google Cloud Console](https://console.cloud.google.com/)
+2. Создайте новый проект или выберите существующий
+3. Включите **Google Calendar API**:
+   - APIs & Services → Library → Google Calendar API → Enable
+4. Создайте OAuth 2.0 credentials:
+   - APIs & Services → Credentials → Create Credentials → OAuth Client ID
+   - Application type: Web application
+   - Authorized redirect URIs: `http://localhost:3000/api/auth/google/callback`
+5. Скопируйте Client ID и Client Secret в `.env`
+
+### 4. Обновление базы данных
+
+Выполните SQL-миграцию для добавления полей Google токенов:
+
+```bash
+# В Beekeeper Studio выполните:
+prisma/migrations/add_google_tokens.sql
+```
+
+### 5. Генерация Prisma клиента
 
 ```bash
 npm run prisma:generate
 ```
 
-### 4. Запуск в режиме разработки
+### 6. Запуск в режиме разработки
 
 ```bash
 npm run dev
@@ -54,6 +79,10 @@ npm run dev
 | GET | /api/auth/me | Текущий пользователь |
 | PATCH | /api/auth/me | Обновить профиль |
 | GET | /api/auth/users | Пользователи организации |
+| GET | /api/auth/google | Начать OAuth через Google |
+| GET | /api/auth/google/callback | Callback для Google OAuth |
+| GET | /api/auth/google/status | Статус подключения Google |
+| POST | /api/auth/google/disconnect | Отключить Google аккаунт |
 
 ### Комнаты
 
@@ -78,35 +107,55 @@ npm run dev
 | POST | /api/bookings/:id/cancel | Отменить бронирование |
 | DELETE | /api/bookings/:id | Удалить (admin) |
 
+### Google Calendar
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | /api/calendar/events | Получить события из Google Calendar |
+| POST | /api/calendar/sync/:bookingId | Синхронизировать бронирование |
+| POST | /api/calendar/sync-all | Синхронизировать все бронирования |
+| DELETE | /api/calendar/unlink/:bookingId | Отвязать от Google Calendar |
+
+## Google Calendar интеграция
+
+### Как это работает
+
+1. Пользователь авторизуется через Google OAuth
+2. При создании бронирования автоматически создаётся событие в Google Calendar
+3. Участники получают приглашения на email
+4. При отмене бронирования событие отменяется в календаре
+
+### Scope разрешения
+
+Приложение запрашивает следующие разрешения:
+- `profile` — базовая информация профиля
+- `email` — email пользователя
+- `https://www.googleapis.com/auth/calendar` — полный доступ к календарю
+- `https://www.googleapis.com/auth/calendar.events` — управление событиями
+
 ## Примеры запросов
 
-### Логин
+### Авторизация через Google
 
-```bash
-curl -X POST http://localhost:3000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com"}'
+Откройте в браузере:
+```
+http://localhost:3000/api/auth/google
 ```
 
-### Получить комнаты
+После успешной авторизации вы будете перенаправлены на клиент с токеном.
+
+### Получить события из календаря
 
 ```bash
-curl http://localhost:3000/api/rooms \
+curl "http://localhost:3000/api/calendar/events?startDate=2024-01-01&endDate=2024-01-31" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Создать бронирование
+### Синхронизировать бронирование
 
 ```bash
-curl -X POST http://localhost:3000/api/bookings \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{
-    "roomId": "room-uuid",
-    "title": "Планёрка",
-    "startTime": "2024-01-15T10:00:00Z",
-    "endTime": "2024-01-15T11:00:00Z"
-  }'
+curl -X POST http://localhost:3000/api/calendar/sync/BOOKING_ID \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ## Скрипты
@@ -124,16 +173,32 @@ curl -X POST http://localhost:3000/api/bookings \
 ```
 server/
 ├── prisma/
-│   └── schema.prisma      # Схема базы данных
+│   ├── schema.prisma          # Схема базы данных
+│   └── migrations/            # SQL миграции
 ├── src/
-│   ├── config/            # Конфигурация
-│   ├── controllers/       # Контроллеры
-│   ├── lib/               # Библиотеки (Prisma)
-│   ├── middleware/        # Middleware
-│   ├── routes/            # Маршруты
-│   ├── types/             # TypeScript типы
-│   ├── app.ts             # Express приложение
-│   └── index.ts           # Точка входа
+│   ├── config/
+│   │   ├── index.ts           # Конфигурация
+│   │   └── passport.ts        # Google OAuth стратегия
+│   ├── lib/prisma.ts          # Prisma клиент
+│   ├── types/index.ts         # TypeScript типы
+│   ├── services/
+│   │   └── googleCalendar.service.ts  # Google Calendar API
+│   ├── middleware/
+│   │   ├── auth.ts            # JWT авторизация
+│   │   └── errorHandler.ts    # Обработка ошибок
+│   ├── controllers/
+│   │   ├── auth.controller.ts
+│   │   ├── rooms.controller.ts
+│   │   ├── bookings.controller.ts
+│   │   └── calendar.controller.ts
+│   ├── routes/
+│   │   ├── index.ts
+│   │   ├── auth.routes.ts
+│   │   ├── rooms.routes.ts
+│   │   ├── bookings.routes.ts
+│   │   └── calendar.routes.ts
+│   ├── app.ts
+│   └── index.ts
 ├── .env.example
 ├── package.json
 └── tsconfig.json
